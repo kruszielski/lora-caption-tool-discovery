@@ -1,0 +1,44 @@
+%% Visão estrutural — visão de containers (inspirada no C4) do lora-caption-tool.
+%% Gerada com GenAI a partir do código-fonte e validada linha a linha em src/
+%% (registro de ajustes: docs/02-ia-diagramas.md, itens M-01..M-03).
+%% Este arquivo É a fonte de verdade da arquitetura (diagrams-as-code).
+flowchart TB
+  classDef person fill:#0E7490,stroke:#155E75,color:#fff,stroke-width:2px;
+  classDef container fill:#4488CC,stroke:#2F6599,color:#fff;
+  classDef ext fill:#6B7280,stroke:#4B5563,color:#fff;
+  classDef data fill:#C3AA68,stroke:#9C8440,color:#1F2937;
+
+  user(["Operador<br/>(máquina única, Windows)"]):::person
+
+  subgraph SYS["lora-caption-tool — ferramenta de lote local (sem serviço, sem banco, sem fila)"]
+    bat["Lançadores Windows<br/>Caption_Dataset_For_LoRA.bat (arrastar pasta)<br/>atalhos .bat/.ps1"]:::container
+    cli["Fachada CLI<br/>caption_dataset_for_lora.py<br/>(argparse)"]:::container
+    ui["Fachada web (opcional)<br/>caption_gradio_app.py<br/>Gradio · 127.0.0.1:7866"]:::container
+    eng["Motor — caption_folder()<br/>scan · resize · EXIF · progresso/ETA · grava .txt"]:::container
+    hf["Backends HF (in-process)<br/>BLIP base/large · Florence-2<br/>(transformers)"]:::container
+    ola["Adaptador Ollama (HTTP)<br/>urllib · POST /api/chat<br/>1 imagem por request · timeout 300s"]:::container
+    wf["Workflows de exemplo<br/>workflows/*.json (ComfyUI)"]:::container
+  end
+
+  ollama["Ollama — runtime EXTERNO<br/>127.0.0.1:11434<br/>qwen3.6:27b (~17 GB)"]:::ext
+  hub["Hugging Face Hub<br/>pesos BLIP ~1,5 GB / Florence-2 ~1,2 GB<br/>(download no 1º uso)"]:::ext
+  comfy["ComfyUI Desktop<br/>fornece a .venv Python (não é chamada)"]:::ext
+  trainers["Treinadores de LoRA<br/>ai-toolkit · ltx-video-trainer"]:::ext
+
+  srcds[("Pasta do dataset<br/>imagens + EXIF")]:::data
+  outds[("Dataset com legendas<br/>imagem + .txt sidecar")]:::data
+
+  user -- "arrasta a pasta no .bat" --> bat
+  bat -- "python src/caption_dataset_for_lora.py + args" --> cli
+  user -- "navegador" --> ui
+  ui -- "run_caption(...)" --> eng
+  cli -- "caption_folder(...)" --> eng
+  eng -- "imagem Pillow (redimensionada)" --> hf
+  eng -- "JPEG q90 b64 + prompt (+ contexto EXIF)" --> ola
+  ola -- "HTTP localhost:11434" --> ollama
+  hf -. "1º uso: baixa pesos" .-> hub
+  comfy -. "mesmo ambiente Python" .- bat
+  eng -- "lê imagens / EXIF" --> srcds
+  eng -- "grava .txt (UTF-8)" --> outds
+  outds -. "pasta consumida como folder_path + caption_ext: txt" .-> trainers
+  wf -. "pipeline de referência" .- trainers

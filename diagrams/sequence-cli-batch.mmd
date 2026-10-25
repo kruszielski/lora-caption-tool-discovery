@@ -1,0 +1,37 @@
+%% Jornada — drag & drop no Windows (fachada CLI) — arrastar a pasta no .bat.
+%% Validada contra scripts/Caption_Dataset_For_LoRA.bat e main() em
+%% src/caption_dataset_for_lora.py.
+sequenceDiagram
+  autonumber
+  actor U as Usuário (Windows)
+  participant BAT as Caption_Dataset_For_LoRA.bat
+  participant CL as CLI main() na .venv do ComfyUI
+  participant E as Motor caption_folder()
+  participant B as Backend BLIP / Florence-2 / Ollama
+  participant FS as Filesystem
+
+  U->>BAT: solta a pasta do dataset (argumento 1)
+  BAT->>CL: .venv\Scripts\python.exe src\caption_dataset_for_lora.py "<pasta>" [--prefix …]
+  CL->>CL: normalize_path: remove aspas vindas do Explorer, expande ~
+  CL->>E: caption_folder(…)
+  E->>FS: scan → trabalho (pula .txt existentes, a menos de --overwrite)
+
+  alt pasta inválida / sem imagens
+    E-->>U: "ERROR…" / "No images …" → exit 1
+  end
+
+  E->>B: carregamento lazy (1º uso HF: baixa pesos · Ollama: precisa estar rodando com o modelo puxado)
+
+  loop cada imagem (sequencial)
+    E->>B: caption(imagem redimensionada [, contexto EXIF no Ollama])
+    B-->>E: 1 texto por imagem (ou exceção)
+    alt OK
+      E->>FS: imagem.txt (UTF-8) ao lado da imagem — ou cópia em --output-dir
+      E-->>U: stdout: barra + "Xs este arquivo" + ETA + hora prevista
+    else FAIL
+      E-->>U: stdout: linha FAIL com a exceção — continua
+    end
+  end
+
+  E-->>CL: (written, skipped)
+  CL-->>U: "Done. Wrote X captions, skipped Y." → exit 0

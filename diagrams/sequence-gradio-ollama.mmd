@@ -1,0 +1,42 @@
+%% Jornada crítica — legendagem em lote pela UI Gradio (backend Ollama).
+%% Validada contra src/caption_gradio_app.py e src/caption_dataset_for_lora.py
+%% (registro: docs/02-ia-diagramas.md, itens A-05, M-05, M-06).
+sequenceDiagram
+  autonumber
+  actor U as Usuário (navegador)
+  participant UI as UI Gradio 127.0.0.1:7866
+  participant E as Motor caption_folder()
+  participant O as Ollama 127.0.0.1:11434
+  participant FS as Filesystem
+
+  U->>UI: formulário: pasta, prefixo, backend=ollama, checkboxes → "Run captioning"
+  UI->>E: caption_folder(input, output, prefix, max_side, on_progress, log)
+
+  E->>FS: list_images(pasta, recursive)
+  FS-->>E: imagens ordenadas (png/jpg/jpeg/webp/bmp/gif)
+  E->>E: trabalho = imagens sem .txt (todas, se overwrite)
+
+  alt pasta não existe
+    E-->>UI: "ERROR: not a folder: …" → encerra
+  else sem imagens / tudo já legendado
+    E-->>UI: "No images …" / "No captions to write — use --overwrite" → encerra
+  end
+
+  Note over E,O: carregamento lazy — o custo real aparece no 1º request
+
+  loop cada imagem (sequencial, 1 por vez)
+    E->>FS: abre imagem (Pillow) → resize da borda máx. ≤ 1024 (LANCZOS)
+    E->>E: contexto: basename + EXIF whitelist (sem GPS) — se o checkbox estiver ativo
+    E->>O: POST /api/chat {prompt + contexto, JPEG q90 b64} · stream:false · 300s
+    alt 200 OK com conteúdo
+      O-->>E: texto da legenda
+      E->>FS: escreve imagem.txt = prefix+legenda+suffix (UTF-8, "\n")
+      E->>UI: on_progress: barra + ETA (média dos 3 primeiros OK)
+    else URLError / HTTPError / resposta vazia
+      O--xE: erro
+      E->>UI: linha FAIL (exceção) — o loop CONTINUA
+    end
+  end
+
+  E-->>UI: "Done. Wrote {ok} captions, skipped {sk}."
+  UI-->>U: log completo na caixa + progresso 100%
